@@ -87,40 +87,41 @@ this all work behind the scenes.
 ```C
 #include "asyncc.h"
 
-// Defined in asyncc.h is the all-important struct async_state:
-// TODO: possibly automagically handle state tracking on the stack itself
-struct async_state {
-    uint16_t idx;       // Index into the stack
-    uint16_t max;       // Stack depth
-    uint8_t *stack;     // Pointer to the stack
-};
-
-async example(struct async *s)
+enum async example(uint8_t *s)
 {
     // Built-in support for defining local stack variables, checks stack
     // depth and calls global error callback on any overflow (handled safely)
-    ASYNC_BEGIN(s,
+    async_begin(s,
         uint8_t i,
         uint8_t buff[8],
-        struct async_state s1,
-        uint8_t s1_stack[32],
-        ASYNC_STATE(s2, 64));
+        uint8_t s1[8]);
 
-    // Stack variables accessible via convenience macros which expand to
-    // access via pointer to the stack location
-    for(i=0;i<8;i++) {
+    // Locals available as members of struct pointer l (so l->i, l->buff)
+    // A macro _() is defined if you dislike this syntax
+    for(l->i=0;_(i)<8;_(i)++) {
         // Easily await other async functions, just pass along the state
-        buff[i] = await(get_byte(s));
+        l->buff[l->i] = await(get_byte(s));
     }
 
-    // Note: the fork-join parallelism scenario does require explicit
+    // Note that the fork-join parallelism scenario does require explicit
     // creation of new "sub-stacks" at the forking level, but these can be
-    // created in the begin macro like any other "local" variable (see above)
+    // created in the begin macro like any other "local" variable (see above).
+    // Also, note that we only need to allocate a new "sub-stack" for every
+    // additional "simultaneous" async thread.
+    await(some_func(s) & some_func(l->s1));     // Wait until one completes
+    await(some_func(s) | some_func(l->s1));     // Wait until all complete
 
-    await(some_func(&s1) & some_func(&s2));     // Wait until both complete
-    await(some_func(&s1) | some_func(&s2));     // Wait until one completes
+    // But it may be easier to keep it explicit when playing with parallel
+    // sub-functions.
 
-    ASYNC_END();
+    // TODO: could be possible to make a macro to split the remaining stack
+    // into N chunks, or at least allow easier running of functions with manual
+    // stack size allocation off of the current function's stack.
+    // (how to make this work with bounds checking, though...)
+    await(some_func(sub(s,32)), some_func(s,32), some_other_func(s,64));
+
+
+    async_end;
 }
 
 struct async_runtime runtime;
@@ -128,10 +129,11 @@ uint8_t stack[32];
 struct async_state s;
 
 // This callback must be defined somewhere
-void async_error(struct async_state *s
+void async_error(uint8_t *s);
 
 // A runtime comes with basic timing functionality that needs to be driven
 // by a hardware timer ISR or an RTOS timer event of some kind.
+// TODO: implement
 void timer_isr_or_callback(void)
 {
     ASYNC_TICK(&runtime, ISR_TICK_IN_MS);
@@ -140,22 +142,22 @@ void timer_isr_or_callback(void)
 int main(void)
 {
     // Set up runtime and add an async task to it
-    async_init(&runtime);
-    async_sched(&runtime, example, &s, stack);
+    async_init(&runtime);   // TODO: implement runtime
+    async_sched(&runtime, example, &s, stack); // TODO: implement schedule
 
     // Add multiple tasks, this time using a helper macro
-    ASYNC_SCHED(&runtime, example, 32);     // Can run multiple instances
-    ASYNC_SCHED(&runtime, example_2, 64);
+    async_sched(&runtime, example, 32);     // Can run multiple instances
+    async_sched(&runtime, example_2, 64);
 
     // Helper macro to define and init new async_state instances
-    ASYNC_STATE(s2, 128);
+    ASYNC_STACK(s2, 128);
 
     for(;;) {
         // Runs next runnable task
-        async_next(&runtime);
+        async_next(&runtime);       // TODO: implement
 
         // You can also manually drive threads if you so choose
-        ASYNC_CALL(example, s2);
+        async_call(example, s2);        // TODO: implement
     }
 }
 
@@ -197,4 +199,50 @@ improvement (half the number of variable declarations) that it is worth the
 trade-off.  And some of the downsides can be overcome with some special
 debugging tools for inspecting the states on the stack.
 
-TODO: see what this looks like in code
+UPDATE: migrated the implementation to this style, and it is currently working
+quite well.  There is a 32-bit overhead on top of what the async.h library has
+for the first-layer async function, but after that the cost is the same if no
+local variables are used (16-bytes per nested level).  I also provided a flag
+to disable bounds checking of the stack, which then takes it to only 16-bytes
+of additional overhead.
+
+## Possible byte savings
+
+If I really want to be clever I could reduce the stack and spot sizes to 10
+bits.  That would take us to only 30 bits of overhead to store the index,
+length, and spot values (we'd take spot to 12-bits for the free upgrade).
+
+The current size is 48 bits, so it is a meaningful savings of two bytes per
+thread.  It would also open up two free bits in the spot values for creative
+purposes.
+
+An easier creative switch would be to go to 12-bit stack and length values, and
+keep the 16-bit spot values.
+
+## Events on the stack
+A function could block for an event by using some stack memory (a byte or
+16-bit word) to "watch" for the event.  It does so by calling an event
+registering function and then blocking for that memory to be updated with the
+value of the awaited event.
+
+I'm not sure what the most sensible implementation of this would be.  It may
+make more sense to stick with explicit function calls in the user's code.  Any
+magical solution would potentially require more stack space to implement, or
+require some other pre-allocated memory to allow an event manager to keep track
+of who needs to be informed of events.
+
+## 8-bit spots
+Bad idea: we need two labels that we know won't be in 0xFF & __LINE__ for this
+to work (for init and done).  The only way I can think of to do this is to
+reserve one bit for each of these conditions, which then takes us from 256
+lines within a function, to only 64.  That is a much less reasonable
+restriction.
+
+We could try to hash the 16-bit line number into 8-bits, but that risks
+collisions that would be a nightmare to debug.
+
+Also, standardizing on 16-bits makes the spots far simpler to debug since they
+map directly to line numbers.  Also, when testing with an 8-bit local variable
+I noticed that the locals struct is padded, so we're probably not losing much
+real memory performance anyway.  This could make a 16-bit event monitor local
+effectively free, since those bytes would be reserved anyway.
