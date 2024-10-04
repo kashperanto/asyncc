@@ -1,7 +1,7 @@
 // @file example1.c
 // A basic example to demonstrate the functionality
 //
-// Copyright (c) 2023 Tom Wolf
+// Copyright (c) 2024 Tom Wolf
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal

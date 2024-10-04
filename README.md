@@ -16,16 +16,12 @@ temptation to revert to a more traditional state-machine-based event-driven
 architecture in the code (or to take the hit to RAM and use a new thread in
 your RTOS).
 
-It is the opinion of this library is that there is a wide range of applications
-that are too complex for a stackless concurrency library, but not complex
-enough to warrant the overhead (and additional complexity) of true
-multithreading with preemptive context switching and/or parallel execution.
-The goal of this library is to provide something in the middle that scales
-easily as a project grows (and as async infects everything in the system).
-
-If you want to avoid the complexity and overhead of RTOS threads, but also
-aren't in the mood for hand-crafted state machines in a custom time-slicing
-task scheduler or superloop, then this library could be for you.
+This library is an attempt to occupy a middle ground between stackless
+asynchronous code, and full-blown threads with their own stacks and true
+context switching. If you want to avoid the complexity and overhead of RTOS
+threads, but also aren't in the mood for hand-crafted state machines in a
+custom time-slicing task scheduler or superloop, then this library could be for
+you.
 
 # Design Decisions
 
@@ -39,12 +35,15 @@ throughout the design.
 
 ## Batteries-Included
 
-There are a few core components that almost any async application will require,
-so to make it easier to get started we provide a basic async runtime that
-includes the main event loop, timer/sleep functionality, and a simple event
-polling system (and queue) to support a broad range of application needs.
+INCOMPLETE
 
-A secondary motivation for this opinionated batteries-included approach is to
+The intent is to provide a few core components that most async applications
+will require in order to make it easier to get started.  At this time only the
+basic core functionality is provided, and future updates will add things like
+an event loop, timer/sleep functionality, and possibly an event polling system
+with queue to support common use cases for async code.
+
+A secondary motivation for an opinionated batteries-included approach is to
 drive consistency in how async functions are driven and wired together (more
 like the runtimes used in other languages with official async support).  In an
 embedded system the imagined architecture would be one event loop per thread of
@@ -54,7 +53,7 @@ an RTOS, or only a single event loop in a bare metal system.
 
 This library assumes that it is being used in a resource-constrained embedded
 system.  As such many of the features are optional, but we try to pack in as
-much as possible into the core functionality.
+much as possible into the core functionality (work in progress).
 
 This library assumes a single thread of execution per event loop with no
 shared memory access with event loops running in other threads.  Nothing is
@@ -70,19 +69,24 @@ is for statically defined embedded systems.
 This library uses the same switch case macro magic used in Protothreads and
 async.h, and there is no intention of using some of the other techniques that
 let you use switch cases in async functions.  It is assumed that anyone using
-this library will know about the limitations on switch cases.
+this library will know about the limitations on switch case blocks.
 
 We take the magic to the next level by attempting to handle stack allocations
-using macros, but the main goal is for this library to be understandable and
-simple enough that it doesn't scare away users due to impossible-to-debug
-complex macro magic.
+using macros, but we also aim to keep the code simple and understandable enough
+so that it doesn't scare away users due to impossible-to-debug complex macro
+magic.
 
 # Examples
 
-NOTE: this is all currently speculation at this point (the code only exists in
-my head for these functions and macros).  This was a helpful exercise in
-thinking about the API I would want to use, but I do think I know how to make
-this all work behind the scenes.
+NOTE: some of the code below has yet to be implemented, or may be changed if
+I find a better way to do the same thing.  The core functionality is all
+implemented at this time, but I have a few sketches of ideas here that are
+not implemented yet (these are marked in the comments).
+
+You can also see the code in the `examples` folder for code that actually
+compiles and runs.  I do not have makefiles yet, but example1.c is simple
+enough for make to figure out on its own.
+
 
 ```C
 #include "asyncc.h"
@@ -114,26 +118,20 @@ enum async example(uint8_t *s)
     // But it may be easier to keep it explicit when playing with parallel
     // sub-functions.
 
-    // TODO: could be possible to make a macro to split the remaining stack
-    // into N chunks, or at least allow easier running of functions with manual
-    // stack size allocation off of the current function's stack.
-    // (how to make this work with bounds checking, though...)
-    await(some_func(sub(s,32)), some_func(s,32), some_other_func(s,64));
-
-
     async_end;
 }
 
+// TODO: this is not implemented yet
 struct async_runtime runtime;
-uint8_t stack[32];
-struct async_state s;
 
-// This callback must be defined somewhere
+uint8_t stack[32];
+
+// This callback must be defined somewhere (TODO: not implemented)
 void async_error(uint8_t *s);
 
 // A runtime comes with basic timing functionality that needs to be driven
 // by a hardware timer ISR or an RTOS timer event of some kind.
-// TODO: implement
+// TODO: not implemented
 void timer_isr_or_callback(void)
 {
     ASYNC_TICK(&runtime, ISR_TICK_IN_MS);
@@ -142,7 +140,9 @@ void timer_isr_or_callback(void)
 int main(void)
 {
     // Set up runtime and add an async task to it
-    async_init(&runtime);   // TODO: implement runtime
+    // TODO: async_sched not implemented, see example1.c for how to drive
+    // async functions in your own event loop.
+    async_init(&runtime);
     async_sched(&runtime, example, &s, stack); // TODO: implement schedule
 
     // Add multiple tasks, this time using a helper macro
@@ -165,6 +165,8 @@ int main(void)
 
 # Why Shouldn't You Use This Library?
 
+## Limitations vs State Machines
+
 The synchronous/blocking coding style that async and true threads unlock is a
 lie.  Explicit event-driven state machines are sometimes the right answer,
 especially if the problem is not very linear/sequential.  The event polling
@@ -172,7 +174,20 @@ system of this library does make it easy to support explicit state machines,
 but it's possible that a library focused on event-driven hierarchical state
 machines could be a better fit for some applications.
 
+## It's Unusual
+
+This is an unusual way of programming in C, and using macro magic to make DIY
+tiny stacks is probaby a bad idea.  But then again we're writing C code here,
+so the risks are already high.
+
+Use this library at your own risk.  I mainly made it just to see if I could ;)
+
 # Ideas
+
+## Overview
+
+This section is a scratch pad for ideas that could find their way into this
+library or another new project.
 
 ## Stacks all the way down
 

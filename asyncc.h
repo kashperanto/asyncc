@@ -25,6 +25,9 @@
 #ifndef ASYNCC_H
 #define ASYNCC_H
 
+#define ASYNCC_VERSION_MAJOR    0
+#define ASYNCC_VERSION_MINOR    0
+#define ASYNCC_VERSION_PATCH    1
 
 // This magic is used to allow a nice declaration of local variables in the
 // ASYNC_BEGIN() macro (up to 10 locals, which is a reasonable limit and
